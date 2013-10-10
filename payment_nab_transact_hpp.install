@@ -1,0 +1,77 @@
+<?php
+
+/**
+ * @file
+ * Installation and uninstallation functions.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function payment_nab_transact_hpp_schema() {
+  $schema['payment_nab_transact_hpp'] = array(
+    'fields' => array(
+      'pmid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'mode' => array(
+        'type' => 'varchar',
+        'length' => '4',
+      ),
+      'pmid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'vendor_name' => array(
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => TRUE,
+      ),
+      'payment_alert' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'privacy_policy' => array(
+        'type' => 'varchar',
+        'length' => '255',
+      ),
+      'refund_policy' => array(
+        'type' => 'varchar',
+        'length' => '255',
+      ),
+      'gst_rate' => array(
+        'type' => 'varchar',
+        'length' => '10',
+        'not null' => TRUE,
+        'default' => 10,
+      ),
+      'gst_added' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+      ),
+      'return_link_text' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'return_link_url' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('pmid'),
+    'unique keys' => array(
+      'pmid' => array('pmid'),
+    ),
+  );
+
+  return $schema;
+}

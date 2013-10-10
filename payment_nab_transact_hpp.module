@@ -1,0 +1,336 @@
+<?php
+
+/**
+ * @file
+ * Hook implementations and shared functions.
+ */
+
+DEFINE('PAYMENT_NAB_TRANSACT_HPP_URL_TEST', 'https://transact.nab.com.au/test/hpp/payment');
+DEFINE('PAYMENT_NAB_TRANSACT_HPP_URL_LIVE', 'https://transact.nab.com.au/live/hpp/payment');
+
+/**
+ * Implements hook_menu().
+ */
+function payment_nab_transact_hpp_menu() {
+  $items['payment_nab_transact_hpp/redirect/%entity_object'] = array(
+    'load arguments' => array('payment'),
+    'title' => 'Go to payment server',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('payment_nab_transact_hpp_form_redirect', 2),
+    'access callback' => 'payment_nab_transact_hpp_form_redirect_access',
+    'access arguments' => array(2),
+    'type' => MENU_CALLBACK,
+  );
+  $items['payment_nab_transact_hpp/complete/%entity_object'] = array(
+    'load arguments' => array('payment'),
+    'title' => 'NAB hosted payment return url',
+    'page callback' => 'payment_nab_transact_hpp_complete',
+    'access callback' => 'payment_nab_transact_hpp_complete_access',
+    'access arguments' => array(2),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_payment_method_controller_info().
+ */
+function payment_nab_transact_hpp_payment_method_controller_info() {
+  return array('NabTransactHppPaymentMethodController');
+}
+
+/**
+ * Implements hook_payment_status_info().
+ */
+function payment_nab_transact_hpp_payment_payment_status_info() {
+  return array(
+    new PaymentStatusInfo(array(
+      'description' => t('Payment completed.'),
+      'status' => STRIPE_PAYMENT_STATUS_PAID,
+      'parent' => PAYMENT_STATUS_SUCCESS,
+      'title' => t('Success (paid)'),
+    )),
+    new PaymentStatusInfo(array(
+      'description' => t('Charge is still un-captured.'),
+      'status' => STRIPE_PAYMENT_STATUS_UNCAPTURED,
+      'parent' => PAYMENT_STATUS_PENDING,
+      'title' => t('Pending (un-captured)'),
+    )),
+  );
+}
+
+/**
+ * Implements hook_entity_load().
+ */
+function payment_nab_transact_hpp_entity_load(array $entities, $entity_type) {
+if ($entity_type == 'payment_method') {
+    $pmids = array();
+    foreach ($entities as $payment_method) {
+      if ($payment_method->controller->name == 'NabTransactHppPaymentMethodController') {
+        $pmids[] = $payment_method->pmid;
+      }
+    }
+    if ($pmids) {
+      $query = db_select('payment_nab_transact_hpp')
+        ->fields('payment_nab_transact_hpp')
+        ->condition('pmid', $pmids);
+      $result = $query->execute();
+      while ($data = $result->fetchAssoc()) {
+        $payment_method = $entities[$data['pmid']];
+        $payment_method->controller_data = (array) $data;
+        unset($payment_method->controller_data['pmid']);
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_ACTION().
+ */
+function payment_nab_transact_hpp_payment_method_insert(PaymentMethod $payment_method) {
+  if ($payment_method->controller->name == 'NabTransactHppPaymentMethodController') {
+    $payment_method->controller_data += $payment_method->controller->controller_data_defaults;
+    $query = db_insert('payment_nab_transact_hpp');
+    $values = array_merge($payment_method->controller_data, array(
+      'pmid' => $payment_method->pmid,
+    ));
+    $query->fields($values);
+    $query->execute();
+  }
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_ACTION().
+ */
+function payment_nab_transact_hpp_payment_method_update(PaymentMethod $payment_method) {
+  if ($payment_method->controller->name == 'NabTransactHppPaymentMethodController') {
+    $query = db_update('payment_nab_transact_hpp');
+    $values = array_merge($payment_method->controller_data, array(
+      'pmid' => $payment_method->pmid,
+    ));
+    $query->fields($values);
+    $query->condition('pmid', $payment_method->pmid);
+    $query->execute();
+  }
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_ACTION().
+ */
+function payment_nab_transact_hpp_payment_method_delete($entity) {
+  if ($entity->controller->name == 'NabTransactHppPaymentMethodController') {
+    db_delete('payment_nab_transact_hpp')
+      ->condition('pmid', $entity->pmid)
+      ->execute();
+  }
+}
+
+/**
+ * Form build callback: implements
+ * PaymentMethodController::payment_method_configuration_form_elements_callback.
+ *
+ * @return array
+ *   A Drupal form.
+ */
+function payment_nab_transact_hpp_payment_method_configuration_form_elements(array $form, array &$form_state) {
+  $controller_data = $form_state['payment_method']->controller_data;
+
+//  $elements['status'] = array(
+//    '#type' => 'select',
+//    '#title' => t('Final payment status'),
+//    '#description' => t('The status to give a payment after being processed by this payment method.'),
+//    '#default_value' => isset($controller_data['status']) ? $controller_data['status'] : PAYMENT_STATUS_SUCCESS,
+//    '#options' => payment_status_options(),
+//  );
+//  $elements['message'] = array(
+//    '#type' => 'text_format',
+//    '#title' => t('Payment form message'),
+//    '#default_value' => isset($controller_data['message']) ? $controller_data['message'] : '',
+//    '#format' => isset($controller_data['text_format']) ? $controller_data['text_format'] : filter_default_format(),
+//  );
+
+  $elements['mode'] = array(
+    '#type' => 'radios',
+    '#title' => t('Select test or live mode'),
+    '#default_value' => isset($controller_data['mode']) ? $controller_data['mode'] : 'test',
+    '#options' => array('test' => t('Test'), 'live' => t('Live')),
+    '#required' => TRUE,
+  );
+  $elements['vendor_name'] = array(
+    '#type' => 'textfield',
+    '#title' => t('NAB merchant ID'),
+    '#default_value' => isset($controller_data['vendor_name']) ? $controller_data['vendor_name'] : 'NAB0010',
+    '#size' => 16,
+    '#required' => TRUE,
+  );
+  $elements['payment_alert'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Merchant Email'),
+    '#description' => t('Contact email at the vendor end'),
+    '#size' => 80,
+    '#default_value' => isset($controller_data['payment_alert']) ? $controller_data['payment_alert'] : '',
+  );
+  $elements['privacy_policy'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Privacy policy url'),
+    '#size' => 80,
+    '#description' => t('Set your privacy policy page'),
+    '#default_value' => isset($controller_data['privacy_policy']) ? $controller_data['privacy_policy'] : '',
+  );
+  $elements['refund_policy'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Refund policy url'),
+    '#size' => 80,
+    '#description' => t('Set your refund policy page'),
+    '#default_value' => isset($controller_data['refund_policy']) ? $controller_data['refund_policy'] : '',
+  );
+  $elements['gst_rate'] = array(
+    '#type' => 'textfield',
+    '#title' => t('GST rate'),
+    '#size' => 80,
+    '#description' => t('Set the GST rate, default is 10 or ten percent'),
+    '#default_value' => isset($controller_data['gst_rate']) ? $controller_data['gst_rate'] : '10',
+  );
+  $elements['gst_added'] = array(
+    '#type' => 'radios',
+    '#title' => t('NAB transact to deal with GST'),
+    '#default_value' => isset($controller_data['gst_added']) ? $controller_data['gst_added'] : 1,
+    '#options' => array(1 => t('True'), 0 => t('False')),
+    '#required' => TRUE,
+  );
+  $elements['return_link_text'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Return link text'),
+    '#size' => 80,
+    '#description' => t('Text for the return link after completion of checkout at the NAB'),
+    '#default_value' => isset($controller_data['return_link_text']) ? $controller_data['return_link_text'] : t('Click here to complete your payment.'),
+    '#required' => TRUE,
+  );
+  $elements['return_link_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Return link URL'),
+    '#size' => 80,
+    '#description' => t('URL for the return link after completion of checkout at the NAB'),
+    '#default_value' => isset($controller_data['return_link_url']) ? $controller_data['return_link_url'] : '',
+    '#required' => TRUE,
+  );
+
+  return $elements;
+}
+
+/**
+ * Implements form validate callback for
+ * payment_nab_transact_hpp_payment_method_configuration_form_elements().
+ */
+function payment_nab_transact_hpp_payment_method_configuration_form_elements_validate(array $element, array &$form_state) {
+  $values = drupal_array_get_nested_value($form_state['values'], $element['#parents']);
+  $controller_data = &$form_state['payment_method']->controller_data;
+
+  $controller_data['mode'] = $values['mode'];
+  $controller_data['vendor_name'] = $values['vendor_name'];
+  $controller_data['payment_alert'] = $values['payment_alert'];
+  $controller_data['privacy_policy'] = $values['privacy_policy'];
+  $controller_data['refund_policy'] = $values['refund_policy'];
+  $controller_data['gst_rate'] = $values['gst_rate'];
+  $controller_data['gst_added'] = $values['gst_added'];
+  $controller_data['return_link_text'] = $values['return_link_text'];
+  $controller_data['return_link_url'] = $values['return_link_url'];
+}
+
+/**
+ * Access callback for the redirect form.
+ *
+ * @param Payment $payment
+ *   The payment to check access to.
+ * @param object $user
+ *   An optional user to check access for. If NULL, then the currently logged
+ *   in user is used.
+ *
+ * @return bool
+ */
+function payment_nab_transact_hpp_form_redirect_access(Payment $payment) {
+  global $user;
+
+  return is_a($payment->method->controller, 'NabTransactHppPaymentMethodController')
+    && payment_status_is_or_has_ancestor($payment->getStatus()->status, PAYMENT_STATUS_PENDING)
+    && isset($_SESSION['payment_nab_transact_hpp_pid']) && $_SESSION['payment_nab_transact_hpp_pid'] == $payment->pid;
+}
+
+/**
+ * Form build callback: the redirect form.
+ */
+function payment_nab_transact_hpp_form_redirect(array $form, array &$form_state, Payment $payment) {
+  $form['#action'] = $payment->method->controller->serverURL($payment->method->controller_data['mode']);
+  dpm($payment->method->controller->redirectData($payment));
+  foreach ($payment->method->controller->redirectData($payment) as $parameter => $value) {
+    $form[$parameter] = array(
+      '#type' => 'hidden',
+      '#value' => trim($value),
+    );
+  }
+  $form['message'] = array(
+    '#type' => 'markup',
+    '#markup' => '<p>' . t('You will be redirected to the off-site payment server to authorize the payment.') . '</p>',
+  );
+  // We need form submission as quickly as possible, so use light inline code.
+  $form['js'] = array(
+    '#type' => 'markup',
+    '#markup' => '<script type="text/javascript">document.getElementById(\'payment-nab-hosted-form-redirect\').submit();</script>',
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Continue'),
+  );
+
+  return $form;
+}
+
+/**
+ * Checks access for the return URL.
+ *
+ * @return bool
+ */
+function payment_nab_transact_hpp_complete_access(Payment $payment) {
+  if (is_a($payment->method->controller, 'NabTransactHppPaymentMethodController')
+    && payment_status_is_or_has_ancestor($payment->getStatus()->status, PAYMENT_STATUS_PENDING)) {
+
+    $controller = payment_method_controller_load('NabTransactHppPaymentMethodController');
+    $data = $controller->feedbackData();
+
+    if (isset($data['bank_reference']) && isset($data['payment_amount'])) {
+      return TRUE;
+    }
+  }
+    
+  watchdog('NAB hosted payment callback', 'Invalid reply link: !query', array('!query' => $_GET['q']));
+  return FALSE;
+}
+
+/**
+ * Processes a return/feedback request.
+ *
+ * @return NULL
+ */
+function payment_nab_transact_hpp_complete(Payment $payment) {
+  $controller = payment_method_controller_load('NabTransactHppPaymentMethodController');
+  $data = $controller->feedbackData();
+  watchdog('NAB hosted payment callback', 'Payment link: . Raw data: !raw_data', array('!raw_data' => '<pre>' . print_r($data, TRUE) . '</pre>'));
+  $payment->method->controller->processFeedback($data, $payment);
+}
+
+/**
+ * Implements PaymentMethodController::payment_configuration_form_elements_callback.
+ */
+function payment_nab_transact_hpp_payment_configuration_form_elements(array $element, array &$form_state) {
+  $payment = $form_state['payment'];
+
+  $elements = array();
+//  $elements['message'] = array(
+//    '#type' => 'markup',
+//    '#markup' => check_markup($payment->method->controller_data['message'], $payment->method->controller_data['text_format']),
+//  );
+    return $elements;
+}
+

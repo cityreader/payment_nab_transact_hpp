@@ -1,0 +1,7 @@
+name = NAB Transact Hosted Payment method
+description = Integrates the NAB hosted payment method
+core = 7.x
+dependencies[] = payment
+dependencies[] = paymentbilling
+files[] = includes/NabTransactHppPaymentMethodController.inc
+package = Payment
